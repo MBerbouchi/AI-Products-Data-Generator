@@ -11,12 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AI_MODEL = "llama-3.3-70b-versatile"
-BASE_URL = "https://api.groq.com/openai/v1"
-client = AsyncOpenAI(
-    base_url=BASE_URL,
-    api_key=os.getenv("GROQ_API_KEY"),
-)
+# AI_MODEL = "llama-3.3-70b-versatile"
+# BASE_URL = "https://api.groq.com/openai/v1"
+# client = AsyncOpenAI(
+#     base_url=BASE_URL,
+#     api_key=os.getenv("GROQ_API_KEY"),
+# )
 
 messages = [
     {
@@ -69,7 +69,7 @@ def get_sheet_data(url):
 
 
 # generate marketing content using OpenRouter
-async def generate_content(product, base_messages):
+async def generate_content(product, base_messages, client, model):
 
     # create fresh messages each call
     user_msg = base_messages[1]["content"].format(
@@ -85,7 +85,7 @@ async def generate_content(product, base_messages):
     ]
 
     response = await client.chat.completions.create(
-        model=AI_MODEL,  # << better model
+        model=model,  # << better model
         messages=messages,
         max_tokens=180,
         temperature=0.9,
@@ -94,11 +94,11 @@ async def generate_content(product, base_messages):
     return {"product": product, "content": response.choices[0].message.content}
 
 
-def generate_product_content(sheet_data):
-    return asyncio.run(_async_generate_product_content(sheet_data))
+def generate_product_content(sheet_data, client, model):
+    return asyncio.run(_async_generate_product_content(sheet_data, client, model))
 
 
-async def _async_generate_product_content(sheet_data):
+async def _async_generate_product_content(sheet_data, client, model):
     products_tasks = []
 
     for idx, product in sheet_data.iterrows():
@@ -108,7 +108,7 @@ async def _async_generate_product_content(sheet_data):
             "Price": product["Price"],
             "Keywords": product["Keywords"],
         }
-        products_tasks.append(generate_content(product, messages))
+        products_tasks.append(generate_content(product, messages, client, model))
 
     tasks_result = await asyncio.gather(*products_tasks)
     print(f"\n⚙️ Parsing AI Responses ...\n")
