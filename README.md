@@ -4,6 +4,8 @@
 **Generate high-quality marketing content from Google Sheets using ANY OpenAI-compatible AI model.**
 Supports Groq, Gemini, OpenAI, OpenRouter, and Custom providers — all inside a modern Streamlit UI.
 
+**https://meta-data-generator.streamlit.app/**
+
 ![Image](images/1.png)
 
 ![Image](images/3.png)
