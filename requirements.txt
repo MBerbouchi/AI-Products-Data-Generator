@@ -1,0 +1,7 @@
+streamlit
+gspread
+google-auth
+pandas
+python-dotenv
+openai
+json5
