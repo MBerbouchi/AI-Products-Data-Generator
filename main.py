@@ -1,7 +1,6 @@
 import streamlit as st
 import utils
 from dotenv import load_dotenv
-import asyncio
 import pandas as pd
 import io
 from openai import AsyncOpenAI
@@ -9,69 +8,97 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 
+# ============================================================
+# 🔧 CONFIGURATION DIALOG — CHOOSE PROVIDER, MODEL, API KEY
+# ============================================================
 @st.dialog("Model & API Settings (OpenAI-Compatible)")
 def api_configuration():
-    base_url = ""
-    model = ""
+
+    saved = st.session_state.get("config", {})
+
     provider = st.selectbox(
-        "Choose API Provider", ["Groq", "Gemini", "OpenAI", "OpenRouter", "Custom"]
+        "Choose API Provider",
+        ["Groq", "Gemini", "OpenAI", "OpenRouter", "Custom"],
+        index=["Groq", "Gemini", "OpenAI", "OpenRouter", "Custom"].index(
+            saved.get("provider", "Groq")
+        ),
     )
+
+    base_url = saved.get("base_url", "")
+    model = saved.get("model", "")
+
+    # Provider → Model selection
     match provider:
         case "Groq":
             base_url = "https://api.groq.com/openai/v1"
             model = st.selectbox(
                 "Model",
-                [
-                    "llama-3.3-70b-versatile",
-                    "llama-3.1-8b-instant",
-                ],
+                ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+                index=(
+                    0
+                    if saved.get("provider") != "Groq"
+                    else ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"].index(
+                        saved.get("model", "llama-3.3-70b-versatile")
+                    )
+                ),
             )
+
         case "Gemini":
             base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
             model = st.selectbox(
                 "Model",
-                [
-                    "gemini-2.0-flash",
-                    "gemini-1.5-pro",
-                ],
+                ["gemini-2.0-flash", "gemini-1.5-pro"],
+                index=(
+                    0
+                    if saved.get("provider") != "Gemini"
+                    else ["gemini-2.0-flash", "gemini-1.5-pro"].index(
+                        saved.get("model", "gemini-2.0-flash")
+                    )
+                ),
             )
+
         case "OpenAI":
             base_url = "https://api.openai.com/v1"
             model = st.selectbox(
                 "Model",
-                [
-                    "gpt-4o",
-                    "gpt-4.1",
-                    "gpt-4.1-mini",
-                ],
+                ["gpt-4o", "gpt-4.1", "gpt-4.1-mini"],
+                index=(
+                    0
+                    if saved.get("provider") != "OpenAI"
+                    else ["gpt-4o", "gpt-4.1", "gpt-4.1-mini"].index(
+                        saved.get("model", "gpt-4o")
+                    )
+                ),
             )
+
         case "OpenRouter":
             base_url = "https://openrouter.ai/api/v1"
             model = st.text_input(
                 "Model name",
                 placeholder="e.g., meta-llama/llama-3-70b",
-                value=st.session_state.get("config", {}).get("model", ""),
+                value=saved.get("model", ""),
             )
 
         case "Custom":
             base_url = st.text_input(
                 "Base URL",
                 placeholder="https://api.example.com/openai/v1",
-                value=st.session_state.get("config", {}).get("base_url", ""),
+                value=saved.get("base_url", ""),
             )
             model = st.text_input(
                 "Model name",
                 placeholder="model-name-here",
-                value=st.session_state.get("config", {}).get("model", ""),
+                value=saved.get("model", ""),
             )
 
     api_key = st.text_input(
         "API Key",
         type="password",
-        value=st.session_state.get("config", {}).get("api_key", ""),
+        value=saved.get("api_key", ""),
     )
 
-    if st.button("save") and api_key and base_url and model:
+    # Save configuration
+    if st.button("Save Configuration") and api_key and base_url and model:
         st.session_state.config = {
             "provider": provider,
             "base_url": base_url,
@@ -81,95 +108,123 @@ def api_configuration():
         st.rerun()
 
 
-# open modal for api configuration
+# ============================================================
+# 🎨 PAGE LAYOUT
+# ============================================================
+
+st.title("AI Products Data Generator 🚀")
+
+# Configuration button
 if st.button("AI Provider Configuration", icon=":material/settings:"):
     api_configuration()
 
-st.title("AI products data generator")
+# Show current configuration summary
+if "config" in st.session_state:
+    cfg = st.session_state.config
+    st.success(f"Using **{cfg['provider']} → {cfg['model']}**")
+else:
+    st.warning("⚠️ No AI provider configured yet. Click 'AI Provider Configuration'.")
 
 
-async def generate(sheet_data, config):
-    return await utils.generate_product_content(sheet_data, config)
-
+# ============================================================
+# 📄 Import Google Sheet
+# ============================================================
 
 url = st.text_input(
-    "please provide a valid google sheet url",
-    placeholder="Product_Name, Category, Price, Keywords",
+    "Google Sheet URL",
+    placeholder="Paste the link containing Product_Name, Category, Price, Keywords",
 )
-# Submit button
-if st.button("submit") and url:
-    with st.spinner("loading..."):
-        st.session_state.sheet_data = utils.get_sheet_data(
-            url
-        )  # <-- save it in session_state
+
+if st.button("Load Sheet") and url:
+    with st.spinner("Loading Google Sheet…"):
+        sheet_df = utils.get_sheet_data(url)
+
+        # Validate sheet columns
+        missing = utils.validate_sheet(sheet_df)
+        if missing:
+            st.error(f"❌ Missing required columns: {', '.join(missing)}")
+        else:
+            st.session_state.sheet_data = sheet_df
+            st.success("Sheet loaded successfully!")
+
 
 st.write(
-    "> before submiting give this email **client_email in google_service_account.json** editor access"
+    "> Ensure your Google service account email has **editor access** to the sheet."
 )
 
-# Only show this section if we already have sheet_data
+
+# ============================================================
+# 🧠 AI GENERATION
+# ============================================================
+
 if "sheet_data" in st.session_state:
-    st.write(st.session_state.sheet_data)
-    st.subheader("Generate product : title, description, hashtags")
+    df = st.session_state.sheet_data
+    st.subheader("Preview Loaded Data")
+    st.dataframe(df)
 
-    if st.button("generate", icon=":material/autorenew:"):
-
-        # api configuration
-        client = AsyncOpenAI(
-            base_url=st.session_state.get("config", {}).get("base_url", ""),
-            api_key=(st.session_state.get("config", {}).get("api_key", "")),
-        )
+    if st.button("Generate AI Content", icon=":material/rocket_launch:"):
 
         if "config" not in st.session_state:
-            st.warning("plase add your api key and chose a model")
-        else:
-            with st.spinner("Generating..."):
-                st.session_state.generated_products = utils.generate_product_content(
-                    st.session_state.sheet_data,  # <-- use saved version,
-                    client,
-                    st.session_state.config.get("model"),
-                )
+            st.warning("⚠️ Please configure API Provider first.")
+            st.stop()
 
-            st.success("Done!")
+        cfg = st.session_state.config
+
+        # Create client
+        client = AsyncOpenAI(
+            base_url=cfg["base_url"],
+            api_key=cfg["api_key"],
+        )
+
+        with st.spinner("⏳ Generating product content..."):
+            results = utils.generate_product_content(df, client, cfg["model"])
+
+        st.session_state.generated_products = results
+        st.success("🎉 All products generated successfully!")
 
 
-@st.cache_data
+# ============================================================
+# 📤 Export, Download, Update Google Sheet
+# ============================================================
+
+
+# @st.cache_data
 def convert_for_download(df, data_type):
     if data_type == "csv":
-        return df.to_csv().encode("utf-8")
-    else:
-        buffer = io.BytesIO()  # create virtual file
-        df.to_excel(buffer, index=False)  # write excel content into memory
-        buffer.seek(0)  # move pointer to the beginning
-        return buffer
+        return df.to_csv(index=False).encode("utf-8")
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    return buffer
 
 
 if "generated_products" in st.session_state:
-    st.write(pd.DataFrame(st.session_state.generated_products))
-    if st.button(
-        "update google sheet",
-        icon=":material/update:",
-    ):
-        with st.spinner("updating..."):
+    st.subheader("AI-Generated Results")
+
+    results_df = pd.DataFrame(st.session_state.generated_products)
+    st.dataframe(results_df)
+
+    col1, col2 = st.columns(2)
+
+    # Update sheet
+    if col1.button("Update Google Sheet", icon=":material/update:"):
+        with st.spinner("Updating sheet…"):
             utils.update_google_sheet(url, st.session_state.generated_products)
+        st.success("Google Sheet updated!")
 
-        st.success("google sheet updated successfuly!")
-
-    st.download_button(
+    # Downloads
+    col2.download_button(
         label="Download CSV",
-        data=convert_for_download(
-            pd.DataFrame(st.session_state.generated_products), "csv"
-        ),
-        file_name="data.csv",
-        mime="text/csv  ",
+        data=convert_for_download(results_df, "csv"),
+        file_name="generated_products.csv",
+        mime="text/csv",
         icon=":material/download:",
     )
-    st.download_button(
+
+    col2.download_button(
         label="Download Excel",
-        data=convert_for_download(
-            pd.DataFrame(st.session_state.generated_products), "xlsx"
-        ),
-        file_name="data.xlsx",
-        mime="text/xlsx",
+        data=convert_for_download(results_df, "xlsx"),
+        file_name="generated_products.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         icon=":material/download:",
     )
