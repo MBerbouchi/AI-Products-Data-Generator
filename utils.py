@@ -45,16 +45,30 @@ def validate_sheet(df):
 
 
 def get_sheet_data(url):
-    sheet_id = re.search(r"/d/([a-zA-Z0-9-_]+)", url).group(1)
-    worksheet_id = re.search(r"gid=(\d+)", url).group(1)
+    # --- Extract sheet ID ---
+    sheet_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+    if not sheet_match:
+        raise ValueError("Invalid Google Sheet URL")
 
+    sheet_id = sheet_match.group(1)
+
+    # --- Extract optional worksheet gid ---
+    gid_match = re.search(r"gid=(\d+)", url)
+    worksheet_id = int(gid_match.group(1)) if gid_match else None
+
+    # --- Google Sheets auth ---
     creds = Credentials.from_service_account_file(
         "google_service_account.json",
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
-
     gc = gspread.authorize(creds)
-    ws = gc.open_by_key(sheet_id).get_worksheet_by_id(worksheet_id)
+    sh = gc.open_by_key(sheet_id)
+
+    # --- Select worksheet ---
+    if worksheet_id is not None:
+        ws = sh.get_worksheet_by_id(worksheet_id)
+    else:
+        ws = sh.get_worksheet(0)  # fallback to first tab
 
     return pd.DataFrame(ws.get_all_records())
 
@@ -138,28 +152,68 @@ def generate_product_content(sheet_data, client, model):
 
 
 def update_google_sheet(url, parsed_results):
-    sheet_id = re.search(r"/d/([a-zA-Z0-9-_]+)", url).group(1)
-    worksheet_id = re.search(r"gid=(\d+)", url).group(1)
+    # --- Extract sheet ID ---
+    sheet_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+    if not sheet_match:
+        raise ValueError("Invalid Google Sheet URL")
 
+    sheet_id = sheet_match.group(1)
+
+    # --- Extract optional worksheet gid ---
+    gid_match = re.search(r"gid=(\d+)", url)
+    worksheet_id = int(gid_match.group(1)) if gid_match else None
+
+    # --- Google Sheets auth ---
     creds = Credentials.from_service_account_file(
         "google_service_account.json",
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     gc = gspread.authorize(creds)
-    ws = gc.open_by_key(sheet_id).get_worksheet_by_id(worksheet_id)
+    sh = gc.open_by_key(sheet_id)
 
-    # Batch formatting for ALL rows
-    values = []
-    for product in parsed_results:
-        values.append(
-            [
-                product.get("title", ""),
-                product.get("description", ""),
-                ", ".join(product.get("hashtags", [])),
-                product.get("post", ""),
-                product.get("cta", ""),
-            ]
-        )
+    # --- Select worksheet ---
+    ws = (
+        sh.get_worksheet_by_id(worksheet_id)
+        if worksheet_id is not None
+        else sh.get_worksheet(0)
+    )
 
-    ws.update(f"E2:I{len(values)+1}", values)
+    # ============================================================
+    # 1️⃣ ENSURE HEADERS EXIST (BATCH UPDATE)
+    # ============================================================
+    REQUIRED_HEADERS = ["title", "description", "hashtags", "post", "cta"]
+    START_COL = 5  # Column E
+
+    existing_headers = ws.row_values(1)
+
+    header_row = []
+    for i, header in enumerate(REQUIRED_HEADERS):
+        col_index = START_COL + i - 1
+        if len(existing_headers) > col_index and existing_headers[col_index].strip():
+            header_row.append(existing_headers[col_index])
+        else:
+            header_row.append(header)
+
+    # Write headers in ONE call
+    ws.update("E1:I1", [header_row])
+
+    # ============================================================
+    # 2️⃣ PREPARE DATA (BATCH)
+    # ============================================================
+    values = [
+        [
+            product.get("title", ""),
+            product.get("description", ""),
+            ", ".join(product.get("hashtags", [])),
+            product.get("post", ""),
+            product.get("cta", ""),
+        ]
+        for product in parsed_results
+    ]
+
+    # ============================================================
+    # 3️⃣ WRITE DATA (BATCH)
+    # ============================================================
+    ws.update(f"E2:I{len(values) + 1}", values)
+
     return True
