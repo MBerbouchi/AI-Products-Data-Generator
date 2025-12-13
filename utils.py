@@ -5,7 +5,7 @@ import re
 import asyncio
 from openai import AsyncOpenAI
 import json5
-
+import streamlit as st
 
 REQUIRED_COLS = [
     "Product_Name",
@@ -70,10 +70,16 @@ def open_sheet(url):
     worksheet_id = int(gid_match.group(1)) if gid_match else None
 
     # --- Google Sheets auth ---
-    creds = Credentials.from_service_account_file(
-        "google_service_account.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
+    # ✅ Running on Streamlit Cloud
+    if "google_service_account" in st.secrets:
+        creds = Credentials.from_service_account_info(
+            st.secrets["google_service_account"]
+        )
+    else:
+        creds = Credentials.from_service_account_file(
+            "google_service_account.json",
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(sheet_id)
 
