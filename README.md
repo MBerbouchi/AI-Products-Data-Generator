@@ -1,5 +1,5 @@
 
-# 🚀 AI Products content Generator
+# 🚀 AI Marketing Content Generator (OpenAI-Compatible, Google Sheets Integrated)
 
 **Generate high-quality marketing content from Google Sheets using ANY OpenAI-compatible AI model.**
 Supports Groq, Gemini, OpenAI, OpenRouter, and Custom providers — all inside a modern Streamlit UI.
