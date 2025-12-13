@@ -137,15 +137,19 @@ url = st.text_input(
 
 if st.button("Load Sheet") and url:
     with st.spinner("Loading Google Sheet…"):
-        sheet_df = utils.get_sheet_data(url)
 
-        # Validate sheet columns
-        missing = utils.validate_sheet(sheet_df)
-        if missing:
-            st.error(f"❌ Missing required columns: {', '.join(missing)}")
-        else:
-            st.session_state.sheet_data = sheet_df
-            st.success("Sheet loaded successfully!")
+        try:
+            sheet_df = utils.get_sheet_data(url)
+            # Validate sheet columns
+            st.write(sheet_df)
+            missing = utils.validate_sheet(sheet_df)
+            if missing:
+                st.error(f"❌ Missing required columns: {', '.join(missing)}")
+            else:
+                st.session_state.sheet_data = sheet_df
+                st.success("Sheet loaded successfully!")
+        except Exception as e:
+            st.error(e)
 
 
 st.write(
@@ -213,7 +217,9 @@ if "generated_products" in st.session_state:
     # Update sheet
     if col1.button("Update Google Sheet", icon=":material/update:"):
         with st.spinner("Updating sheet…"):
-            utils.update_google_sheet(url, st.session_state.generated_products)
+            utils.update_google_sheet(
+                url, st.session_state.generated_products, st.session_state.sheet_data
+            )
         st.success("Google Sheet updated!")
 
     # Downloads

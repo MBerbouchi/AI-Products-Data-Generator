@@ -7,7 +7,20 @@ from openai import AsyncOpenAI
 import json5
 
 
-REQUIRED_COLS = ["Product_Name", "Category", "Price", "Keywords"]
+REQUIRED_COLS = [
+    "Product_Name",
+    "Category",
+    "Price",
+    "Keywords",
+]
+
+OPTIONAL_COLS = [
+    "title",
+    "description",
+    "hashtags",
+    "post",
+    "cta",
+]
 
 
 messages = [
@@ -44,7 +57,7 @@ def validate_sheet(df):
     return [c for c in REQUIRED_COLS if c not in df.columns]
 
 
-def get_sheet_data(url):
+def open_sheet(url):
     # --- Extract sheet ID ---
     sheet_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
     if not sheet_match:
@@ -65,12 +78,51 @@ def get_sheet_data(url):
     sh = gc.open_by_key(sheet_id)
 
     # --- Select worksheet ---
-    if worksheet_id is not None:
-        ws = sh.get_worksheet_by_id(worksheet_id)
-    else:
-        ws = sh.get_worksheet(0)  # fallback to first tab
+    ws = (
+        sh.get_worksheet_by_id(worksheet_id)
+        if worksheet_id is not None
+        else sh.get_worksheet(0)
+    )
+    return ws
 
-    return pd.DataFrame(ws.get_all_records())
+
+def get_sheet_data(url):
+
+    ws = open_sheet(url)
+    values = ws.get_all_values()
+
+    if not values or len(values) < 2:
+        raise ValueError("The sheet is empty or has no data.")
+
+    headers = [h.strip() for h in values[0]]
+    # Check empty or duplicate headers
+    if "" in headers:
+        raise ValueError("Invalid Sheet Format: Empty column headers are not allowed.")
+
+    if len(headers) != len(set(headers)):
+        raise ValueError("Invalid Sheet Format: Duplicate column headers found.")
+
+    # Check required columns
+    missing_required = [c for c in REQUIRED_COLS if c not in headers]
+
+    if missing_required:
+        raise ValueError(
+            "Invalid Sheet Format.\n\n"
+            "Missing required columns:\n"
+            f"- " + "\n- ".join(missing_required) + "\n\n"
+            "Required columns:\n"
+            f"- " + "\n- ".join(REQUIRED_COLS)
+        )
+
+    # Build DataFrame
+    df = pd.DataFrame(values[1:], columns=headers)
+
+    # # Add optional columns if missing
+    # for col in OPTIONAL_COLS:
+    #     if col not in df.columns:
+    #         df[col] = ""
+
+    return df
 
 
 async def safe_call(coro, retries=3):
@@ -151,51 +203,18 @@ def generate_product_content(sheet_data, client, model):
     return asyncio.run(_async_generate_product_content(sheet_data, client, model))
 
 
-def update_google_sheet(url, parsed_results):
-    # --- Extract sheet ID ---
-    sheet_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
-    if not sheet_match:
-        raise ValueError("Invalid Google Sheet URL")
+def update_google_sheet(url, parsed_results, df):
 
-    sheet_id = sheet_match.group(1)
-
-    # --- Extract optional worksheet gid ---
-    gid_match = re.search(r"gid=(\d+)", url)
-    worksheet_id = int(gid_match.group(1)) if gid_match else None
-
-    # --- Google Sheets auth ---
-    creds = Credentials.from_service_account_file(
-        "google_service_account.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-
-    # --- Select worksheet ---
-    ws = (
-        sh.get_worksheet_by_id(worksheet_id)
-        if worksheet_id is not None
-        else sh.get_worksheet(0)
-    )
-
+    ws = open_sheet(url)
     # ============================================================
     # 1️⃣ ENSURE HEADERS EXIST (BATCH UPDATE)
     # ============================================================
     REQUIRED_HEADERS = ["title", "description", "hashtags", "post", "cta"]
-    START_COL = 5  # Column E
 
-    existing_headers = ws.row_values(1)
-
-    header_row = []
-    for i, header in enumerate(REQUIRED_HEADERS):
-        col_index = START_COL + i - 1
-        if len(existing_headers) > col_index and existing_headers[col_index].strip():
-            header_row.append(existing_headers[col_index])
-        else:
-            header_row.append(header)
-
-    # Write headers in ONE call
-    ws.update("E1:I1", [header_row])
+    missing_headers = [
+        c for c in REQUIRED_HEADERS if c.lower() not in map(str.lower, df.columns)
+    ]
+    ws.update("E1:I1", [missing_headers])
 
     # ============================================================
     # 2️⃣ PREPARE DATA (BATCH)
