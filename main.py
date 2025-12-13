@@ -152,6 +152,10 @@ st.write(
     "> Ensure your Google service account email has **editor access** to the sheet."
 )
 
+st.write(
+    "> For demo use this email: sheet-bot@n8n-automation-480520.iam.gserviceaccount.com."
+)
+
 
 # ============================================================
 # 🧠 AI GENERATION
